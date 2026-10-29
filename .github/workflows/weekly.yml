@@ -1,0 +1,97 @@
+# Every week: fresh tactics puzzles (Lichess), a new opening focus, and a check for a newer Stockfish.
+# Content lands in /content on main; the app downloads it on launch (no reinstall needed).
+# A new Stockfish triggers a fresh APK release.
+#
+# Keeping it alive: GitHub disables scheduled workflows after 60 days without repository activity.
+# The weekly content commit is that activity; the empty-commit step below is a second safety net.
+name: weekly-content
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"   # Mondays 04:23 UTC
+    - cron: "23 4 * * 4"   # Thursdays: backup in case Monday failed (skips if the week is already done)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: weekly-content
+  cancel-in-progress: false
+
+jobs:
+  content:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      engine_changed: ${{ steps.commit.outputs.engine_changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Keep the schedule alive
+        run: |
+          last=$(git log -1 --format=%ct origin/main)
+          if [ $(( ($(date +%s) - last) / 86400 )) -ge 45 ]; then
+            git config user.name "chess-coach-bot"; git config user.email "bot@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keep weekly content scheduled"
+            git push origin HEAD:main
+          fi
+      - name: Already done this week?
+        id: check
+        run: |
+          this=$(date -u +%G-W%V)
+          have=$(python3 -c "import json;print(json.load(open('content/manifest.json')).get('week',''))" 2>/dev/null || echo "")
+          if [ "$this" = "$have" ] && [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" != "1" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Week $this already published"
+          fi
+      - uses: actions/setup-python@v6
+        if: steps.check.outputs.skip != 'true'
+        with: { python-version: "3.12" }
+      - name: Fetch puzzles, openings, engine version
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install chess==1.11.2
+          python scripts/update_content.py --out content --root . \
+            || { echo "retrying in 2 min"; sleep 120; python scripts/update_content.py --out content --root .; }
+      - name: Commit
+        id: commit
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name "chess-coach-bot"; git config user.email "bot@users.noreply.github.com"
+          changed_engine=false
+          git diff --quiet -- engine-version.txt || changed_engine=true
+          git add content engine-version.txt
+          if git diff --cached --quiet; then echo "nothing new"; else
+            git commit -m "content: $(date -u +%G-W%V) puzzles$([ $changed_engine = true ] && echo ", Stockfish $(cat engine-version.txt)")"
+            git push origin HEAD:main
+          fi
+          echo "engine_changed=$changed_engine" >> "$GITHUB_OUTPUT"
+      # One issue collects failures; GitHub emails the repo owner. It closes itself on the next success.
+      - name: Alert on failure
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          num=$(gh issue list --label weekly-failed --state open --json number --jq '.[0].number' || true)
+          body="@${{ github.repository_owner }} The weekly content refresh failed on $(date -u +'%F %H:%M UTC'). The app keeps last week's puzzles until a run succeeds. Log: $RUN_URL"
+          gh label create weekly-failed --color B60205 2>/dev/null || true
+          if [ -n "$num" ]; then gh issue comment "$num" --body "$body"; else gh issue create --title "Weekly content refresh failed" --label weekly-failed --body "$body"; fi
+      - name: Close alert on success
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for n in $(gh issue list --label weekly-failed --state open --json number --jq '.[].number' 2>/dev/null); do
+            gh issue close "$n" --comment "Fixed: the latest weekly run succeeded."
+          done
+
+  release:
+    needs: content
+    if: needs.content.outputs.engine_changed == 'true'
+    uses: ./.github/workflows/release.yml
+    secrets: inherit

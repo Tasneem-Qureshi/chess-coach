@@ -1,0 +1,16 @@
+.DS_Store
+.gradle/
+.kotlin/
+build/
+app/build/
+.idea/
+local.properties
+*.iml
+# Stockfish binary is downloaded at build time (see app/build.gradle.kts)
+app/src/main/jniLibs/
+# Signing material never goes into git
+keystore.properties
+*.jks
+*.keystore
+*.apk
+__pycache__/

@@ -1,0 +1,74 @@
+# Builds the signed APK and publishes it as a GitHub Release. The app checks the latest release on
+# launch and offers the update in-app. Runs on app changes, after a Stockfish bump from the weekly job,
+# or by hand. Only GitHub-owned actions are used, so a blocked third-party action can't break the build.
+name: build-and-release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "engine-version.txt"
+      - "*.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Version from commit count
+        run: |
+          n=$(( 100 + $(git rev-list --count HEAD) ))
+          echo "VERSION_CODE=$n" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=1.0.$n" >> "$GITHUB_ENV"
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::KEYSTORE_B64 secret missing — releases must be signed with the same key so updates install"; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > release.jks
+          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEYSTORE_PASSWORD" > keystore.properties
+      - name: Unit tests
+        run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest
+      - name: Build release APK
+        run: ./gradlew --no-daemon --console=plain :app:assembleRelease
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          apk="ChessCoach-v$VERSION_NAME.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          engine=$(cat engine-version.txt)
+          week=$(python3 -c "import json;print(json.load(open('content/manifest.json'))['week'])")
+          notes=$(printf 'Chess Coach %s\n\n- Engine: Stockfish %s\n- Bundled content: %s\n- Commit: %s\n\nInstall: download the APK below on your phone and open it. Already installed? The app offers this update itself.' \
+            "$VERSION_NAME" "${engine#sf_}" "$week" "$(git log -1 --format=%s)")
+          gh release create "v$VERSION_NAME" "$apk" --title "Chess Coach $VERSION_NAME" --notes "$notes" --latest
+          # keep the five newest releases
+          gh release list --limit 100 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+            | while read -r t; do gh release delete "$t" --yes --cleanup-tag; done
+      - name: Clean signing material
+        if: always()
+        run: rm -f release.jks keystore.properties

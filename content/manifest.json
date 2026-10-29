@@ -1,0 +1,24 @@
+{
+ "version": 2026102915,
+ "week": "2026-W44",
+ "updated": "2026-10-29",
+ "theme": "clearance",
+ "engine": "sf_19",
+ "focus": [
+  {
+   "eco": "E00",
+   "name": "Catalan Opening",
+   "moves": "d4 Nf6 c4 e6 g3 d5"
+  },
+  {
+   "eco": "B03",
+   "name": "Alekhine Defense",
+   "moves": "e4 Nf6 e5 Nd5 d4 d6"
+  },
+  {
+   "eco": "C55",
+   "name": "Italian Game: Two Knights Defense",
+   "moves": "e4 e5 Nf3 Nc6 Bc4 Nf6"
+  }
+ ]
+}
