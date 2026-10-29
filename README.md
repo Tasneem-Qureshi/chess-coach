@@ -2,7 +2,7 @@
 
 A personal Android training app that reads the chess board on your screen and coaches you: the best move with the reason behind it, a grade for every move you play, and a full strengths and weaknesses report after each match. Pure-black AMOLED theme.
 
-**[Download the latest APK](https://github.com/Tasneem-Qureshi/chess-coach/releases/latest)** (Android 10+, 64-bit ARM phones).
+**[Download the latest APK](https://github.com/Tasneem-Qureshi/chess-coach/releases/latest/download/ChessCoach.apk)** (Android 10+, 64-bit ARM phones).
 
 ## What it does
 

@@ -61,11 +61,13 @@ jobs:
         run: |
           apk="ChessCoach-v$VERSION_NAME.apk"
           cp app/build/outputs/apk/release/app-release.apk "$apk"
+          # fixed name too, so .../releases/latest/download/ChessCoach.apk always works
+          cp "$apk" ChessCoach.apk
           engine=$(cat engine-version.txt)
           week=$(python3 -c "import json;print(json.load(open('content/manifest.json'))['week'])")
           notes=$(printf 'Chess Coach %s\n\n- Engine: Stockfish %s\n- Bundled content: %s\n- Commit: %s\n\nInstall: download the APK below on your phone and open it. Already installed? The app offers this update itself.' \
             "$VERSION_NAME" "${engine#sf_}" "$week" "$(git log -1 --format=%s)")
-          gh release create "v$VERSION_NAME" "$apk" --title "Chess Coach $VERSION_NAME" --notes "$notes" --latest
+          gh release create "v$VERSION_NAME" "$apk" ChessCoach.apk --title "Chess Coach $VERSION_NAME" --notes "$notes" --latest
           # keep the five newest releases
           gh release list --limit 100 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
             | while read -r t; do gh release delete "$t" --yes --cleanup-tag; done
