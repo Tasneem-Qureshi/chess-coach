@@ -24,7 +24,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,7 +36,6 @@ import com.tasneem.chesscoach.Route
 import com.tasneem.chesscoach.capture.CoachService
 import com.tasneem.chesscoach.data.AppUpdater
 import com.tasneem.chesscoach.ui.theme.Amoled
-import kotlinx.coroutines.launch
 
 @Composable
 fun CoachScreen(onStartCoach: () -> Unit, open: (Route) -> Unit, onTab: (Route) -> Unit) {
@@ -47,7 +45,6 @@ fun CoachScreen(onStartCoach: () -> Unit, open: (Route) -> Unit, onTab: (Route) 
     val games by app.games.games.collectAsState()
     val content by app.content.content.collectAsState()
     val update by app.updater.state.collectAsState()
-    val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ScreenTitle("Chess Coach") {
@@ -55,16 +52,24 @@ fun CoachScreen(onStartCoach: () -> Unit, open: (Route) -> Unit, onTab: (Route) 
         }
         Column(Modifier.padding(horizontal = 16.dp)) {
             when (val u = update) {
-                is AppUpdater.State.Available -> AmoledCard(onClick = { scope.launch { app.updater.downloadAndInstall(u.update) } }) {
+                is AppUpdater.State.Available -> AmoledCard(onClick = { app.updater.start(u.update) }) {
                     Text("Update ${u.update.versionName} available", color = Amoled.Accent, fontWeight = FontWeight.SemiBold)
                     Text("Tap to download and install.", color = Amoled.Muted, fontSize = 13.sp)
                 }
                 is AppUpdater.State.Downloading -> AmoledCard {
-                    Text("Downloading update…", color = Amoled.Text)
+                    Text("Downloading ${u.update.versionName}… ${(u.progress * 100).toInt()}%", color = Amoled.Text)
+                    Text("You can leave the app — it keeps downloading and shows in your notifications.", color = Amoled.Muted, fontSize = 12.sp)
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(progress = { u.progress }, modifier = Modifier.fillMaxWidth(), color = Amoled.Accent, trackColor = Amoled.Raised)
                 }
-                is AppUpdater.State.Failed -> AmoledCard { Text("Update failed: ${u.message}", color = Amoled.Bad, fontSize = 13.sp) }
+                is AppUpdater.State.Failed -> AmoledCard {
+                    Text("Update failed: ${u.message}", color = Amoled.Bad, fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PrimaryButton("Try again", Modifier.weight(1f)) { app.updater.start(u.update) }
+                        GhostButton("Download in browser", Modifier.weight(1f)) { app.updater.openInBrowser() }
+                    }
+                }
                 AppUpdater.State.Idle -> Unit
             }
             if (update !is AppUpdater.State.Idle) Spacer(Modifier.height(12.dp))

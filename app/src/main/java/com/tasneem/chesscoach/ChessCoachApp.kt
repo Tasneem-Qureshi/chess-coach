@@ -18,7 +18,7 @@ class ChessCoachApp : Application() {
     val settings by lazy { SettingsStore(this) }
     val games by lazy { GameStore(this) }
     val content by lazy { ContentRepo(this) }
-    val updater by lazy { AppUpdater(this) }
+    val updater by lazy { AppUpdater(this, scope) }
     /** One engine process for the whole app; searches are serialised inside. */
     val engine by lazy { Stockfish(this) }
     val reviews by lazy { ReviewManager(scope, engine, games, content, settings) }
