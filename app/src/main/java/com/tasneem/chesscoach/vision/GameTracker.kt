@@ -12,6 +12,11 @@ import com.tasneem.chesscoach.chess.Position
  */
 class GameTracker(private val resyncAfterMs: Long = 2_500) {
 
+    companion object {
+        /** Misread squares tolerated away from the squares a move changes. */
+        const val MAX_NOISE = 2
+    }
+
     sealed interface Event {
         /** [previous] is the game that was being tracked before the reset, if it had any moves. */
         data class NewGame(val userIsWhite: Boolean, val previous: Game?) : Event
@@ -38,8 +43,8 @@ class GameTracker(private val resyncAfterMs: Long = 2_500) {
     }
 
     /** Starts tracking from a known position (e.g. the user chose who is to move after a resync). */
-    fun setPosition(p: Position) {
-        position = p; startFen = p.toFen(); moves.clear(); mismatchRaw = null
+    fun setPosition(p: Position, guessed: Boolean = false) {
+        position = p; startFen = p.toFen(); moves.clear(); mismatchRaw = null; sideGuessed = guessed
     }
 
     fun onBoard(raw: IntArray, now: Long): List<Event> {
@@ -56,40 +61,92 @@ class GameTracker(private val resyncAfterMs: Long = 2_500) {
         if (pos == null) {
             if (stable != 1) return emptyList()
             val p = Position.fromBoard(fill(raw, null), whiteToMove = userIsWhite)
-            setPosition(p)
+            setPosition(p, guessed = true)
             return listOf(Event.Resynced(p, null))
         }
         if (matches(pos, raw)) { mismatchRaw = null; return emptyList() }
 
         if (mismatchRaw?.contentEquals(raw) != true) {
-            // one ply
-            for (m in pos.legalMoves()) {
-                val next = pos.play(m)
-                if (matches(next, raw)) return listOf(record(pos, m))
-            }
-            // two plies (a fast reply between frames)
-            for (m in pos.legalMoves()) {
-                val mid = pos.play(m)
-                for (m2 in mid.legalMoves()) if (matches(mid.play(m2), raw)) return listOf(record(pos, m), record(mid, m2))
-            }
-            // unexplained: wait, then resync if it persists
+            explain(pos, raw)?.let { return apply(it) }
+            // unexplained (noise, an animation, or several missed moves): wait, then resync if it persists
             mismatchRaw = raw; mismatchSince = now
             return emptyList()
         }
-        if (now - mismatchSince < resyncAfterMs || diffCount(pos, raw) > 16) return emptyList()
+        if (now - mismatchSince < resyncAfterMs || diffCount(pos, raw) > 16 || diffCount(pos, raw) <= MAX_NOISE) return emptyList()
         val p = Position.fromBoard(fill(raw, pos), whiteToMove = guessSideToMove(pos, raw))
         val prev = previousGame()
-        setPosition(p)
+        setPosition(p, guessed = true)
         return listOf(Event.Resynced(p, prev))
     }
 
+    /** A way to get from the tracked position to the reading: one ply, a missed turn, or two plies. */
+    private class Candidate(val steps: List<Pair<Position, Move>>, val result: Position, val sideWasWrong: Boolean, val rank: Int)
+
+    /**
+     * Finds the move sequence that best explains [raw]. Every square the moves change must read correctly;
+     * elsewhere up to [MAX_NOISE] misread squares (highlights, move dots, animations) are tolerated.
+     * Tries, in order: one ply; one ply by the *other* side (the side to move was guessed wrong, or a
+     * move was missed); two plies (a fast reply between frames).
+     */
+    private fun explain(pos: Position, raw: IntArray): Candidate? {
+        var best: Candidate? = null
+        var bestDiff = Int.MAX_VALUE
+        fun consider(c: Candidate) {
+            if (!changesReadCorrectly(pos, c.result, raw)) return
+            val d = diffCount(c.result, raw)
+            if (d <= MAX_NOISE && (d < bestDiff || (d == bestDiff && c.rank < best!!.rank))) { best = c; bestDiff = d }
+        }
+        for (m in pos.legalMoves()) consider(Candidate(listOf(pos to m), pos.play(m), false, 0))
+        // handing the move to the other side is only possible if the side to move is not in check
+        if (!pos.inCheck()) {
+            val flipped = Position(pos.board, !pos.whiteToMove, pos.castling, -1, 0, pos.fullmove)
+            for (m in flipped.legalMoves()) consider(Candidate(listOf(flipped to m), flipped.play(m), true, 1))
+        }
+        if (bestDiff > 0) for (m in pos.legalMoves()) {
+            val mid = pos.play(m)
+            for (m2 in mid.legalMoves()) consider(Candidate(listOf(pos to m, mid to m2), mid.play(m2), false, 2))
+        }
+        return best
+    }
+
+    /** All squares that differ between [from] and [to] must read as [to] (or be hidden). */
+    private fun changesReadCorrectly(from: Position, to: Position, raw: IntArray): Boolean {
+        var changed = 0
+        for (i in 0 until 64) {
+            if (from.board[i] == to.board[i]) continue
+            if (raw[i] == BoardReader.UNKNOWN) continue
+            if (raw[i] != to.board[i]) return false
+            changed++
+        }
+        return changed > 0
+    }
+
+    private fun apply(c: Candidate): List<Event> {
+        val out = ArrayList<Event>()
+        if (c.sideWasWrong) {
+            // The other side moved. Without history, just correct whose turn it is; with history a
+            // move was missed, so the recorded game ends here and a new segment starts.
+            val (start, _) = c.steps.first()
+            val prev = previousGame()
+            setPosition(start)
+            if (prev != null) out += Event.Resynced(start, prev)
+        }
+        for ((before, m) in c.steps) out += record(before, m)
+        return out
+    }
+
     private fun previousGame(): Game? = if (moves.isEmpty()) null else game()
+
+    /** True while whose turn it is has only been guessed (tracking started mid-game, nothing seen moving yet). */
+    var sideGuessed = false
+        private set
 
     private fun record(before: Position, m: Move): Event.Moved {
         val san = before.san(m)
         moves += m
         position = before.play(m)
         mismatchRaw = null
+        sideGuessed = false
         return Event.Moved(m, san, before.whiteToMove, before)
     }
 

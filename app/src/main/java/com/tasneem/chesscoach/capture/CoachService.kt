@@ -217,6 +217,10 @@ class CoachService : LifecycleService(), CoachActions {
             setUi { it.copy(stage = Stage.LEARNING_PIECES, message = "Start a new game: I learn your board and pieces from the starting position (only needed once).") }
             return
         }
+        if (tracker.position == null && !start) {
+            // started mid-game: work out which colour is at the bottom (= your colour) from the pieces
+            BoardReader.guessOrientation(samples, t)?.let { if (it != orientation) setOrientation(it) }
+        }
         val raw = BoardReader.read(samples, t, orientation, blockedCells(board))
         val kingsOk = raw.count { it == 6 } <= 1 && raw.count { it == -6 } <= 1 && raw.any { it == 6 || it == -6 || it == BoardReader.UNKNOWN }
         if (!kingsOk) {
@@ -285,6 +289,7 @@ class CoachService : LifecycleService(), CoachActions {
         setUi {
             it.copy(
                 stage = Stage.TRACKING, yourTurn = userTurn, plies = tracker.plies, thinking = true, suggestion = null,
+                note = if (tracker.sideGuessed) "Joined mid-game: guessing it's ${if (userTurn) "your" else "their"} move. I'll correct it after the next move, or tap Side ⇄." else null,
                 opponentIdea = null, revealed = !s.tapToReveal, hint = false, userIsWhite = tracker.userIsWhite,
             )
         }
@@ -293,6 +298,17 @@ class CoachService : LifecycleService(), CoachActions {
         if (!app.engine.available) { setUi { it.copy(thinking = false, message = "Engine missing from this build.") }; return }
 
         analysisJob = lifecycleScope.launch(Dispatchers.Default) {
+            try { analyze(pos, userTurn, s) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (t: Throwable) {
+                Log.w(TAG, "analysis failed", t)
+                // the engine restarts itself on the next request; tell the user instead of hanging
+                setUi { it.copy(thinking = false, note = "Engine hiccup — retrying on the next move. Tap Find board if it persists.") }
+            }
+            refreshArrows()
+        }
+    }
+
+    private suspend fun analyze(pos: Position, userTurn: Boolean, s: com.tasneem.chesscoach.data.CoachSettings) {
+        run {
             val fen = pos.toFen()
             if (userTurn) {
                 val a = app.engine.analyze(fen, movetimeMs = s.thinkMs, multiPv = s.lines.coerceIn(1, 3))
@@ -329,7 +345,6 @@ class CoachService : LifecycleService(), CoachActions {
                     )
                 }
             }
-            refreshArrows()
         }
     }
 

@@ -88,6 +88,10 @@ fun CoachPanel(state: StateFlow<CoachUi>, actions: CoachActions, onDrag: (Float,
             Spacer(Modifier.height(8.dp))
             Text(ui.result ?: ui.message, color = Amoled.Text, fontSize = 13.sp)
         }
+        if (ui.stage == Stage.TRACKING && ui.result == null) ui.note?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = Amoled.Warn, fontSize = 12.sp)
+        }
 
         ui.feedback?.let { f ->
             Spacer(Modifier.height(8.dp))

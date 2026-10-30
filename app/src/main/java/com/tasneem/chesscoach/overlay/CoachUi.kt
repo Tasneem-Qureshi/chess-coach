@@ -35,6 +35,8 @@ data class CoachUi(
     val collapsed: Boolean = false,
     val adjusting: Boolean = false,
     val result: String? = null,
+    /** Short status shown while tracking (e.g. whose turn is still a guess, or an engine hiccup). */
+    val note: String? = null,
 )
 
 /** Actions from the panel back to the service. */

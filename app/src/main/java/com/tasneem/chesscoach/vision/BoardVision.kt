@@ -271,6 +271,31 @@ object BoardReader {
         return Orientation(whiteAtBottom = bottom >= top)
     }
 
+    /**
+     * Orientation from any position (not just the start): pawns only move forward, so on average the
+     * white pawns sit lower on the screen than the black ones when white is at the bottom. Kings decide
+     * when pawns don't. Returns null when it can't tell.
+     */
+    fun guessOrientation(s: Array<SquareSample>, t: PieceTemplates): Orientation? {
+        var wp = 0.0; var wn = 0; var bp = 0.0; var bn = 0
+        var wk = -1; var bk = -1
+        for (row in 0 until 8) for (col in 0 until 8) {
+            when (t.classify(s[row * 8 + col])) {
+                1 -> { wp += row; wn++ }
+                -1 -> { bp += row; bn++ }
+                6 -> wk = row
+                -6 -> bk = row
+            }
+        }
+        if (wn >= 2 && bn >= 2) {
+            val diff = wp / wn - bp / bn          // > 0: white pawns lower on screen
+            if (diff >= 1.0) return Orientation(true)
+            if (diff <= -1.0) return Orientation(false)
+        }
+        if (wk >= 0 && bk >= 0 && kotlin.math.abs(wk - bk) >= 4) return Orientation(wk > bk)
+        return null
+    }
+
     fun learn(s: Array<SquareSample>, o: Orientation): PieceTemplates {
         val start = Position.start().board
         val map = HashMap<Int, MutableList<SquareSample>>()

@@ -148,6 +148,20 @@ class VisionTest {
         assertArrayEquals(p.board, BoardReader.read(BoardReader.sampleAll(Render.frame(p, last = last, theme = th), rect), t, o))
     }
 
+    @Test fun orientationIsFoundMidGame() {
+        // pieces learned in an earlier game as white; now the coach opens mid-game playing black
+        val start = Render.frame(Position.start())
+        val rect = BoardLocator.detect(start)!!
+        val s0 = BoardReader.sampleAll(start, rect)
+        val t = BoardReader.learn(s0, BoardReader.orientationFromStart(s0))
+        val (p, last) = play("e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6")
+        val black = BoardReader.sampleAll(Render.frame(p, whiteBottom = false, last = last), rect)
+        assertEquals(Orientation(false), BoardReader.guessOrientation(black, t))
+        assertArrayEquals(p.board, BoardReader.read(black, t, Orientation(false)))
+        val white = BoardReader.sampleAll(Render.frame(p, whiteBottom = true, last = last), rect)
+        assertEquals(Orientation(true), BoardReader.guessOrientation(white, t))
+    }
+
     @Test fun blackAtBottomIsDetected() {
         val start = Render.frame(Position.start(), whiteBottom = false)
         val rect = BoardLocator.detect(start)!!
